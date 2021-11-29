@@ -12,6 +12,9 @@ import torch.utils.data
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import resnet
+import MODELS.model_resnet as CBAM_resnet
+
+from torch.utils.tensorboard import SummaryWriter
 
 model_names = sorted(name for name in resnet.__dict__
     if name.islower() and not name.startswith("__")
@@ -62,12 +65,16 @@ def main():
     global args, best_prec1
     args = parser.parse_args()
 
+    writer = SummaryWriter()
 
     # Check the save_dir exists or not
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
 
-    model = torch.nn.DataParallel(resnet.__dict__[args.arch]())
+    # model = torch.nn.DataParallel(resnet.__dict__[args.arch]())
+    # model = resnet.__dict__[args.arch]()
+    print("model: CBAM_resnet18")
+    model = CBAM_resnet.ResidualNet('CIFAR10', 18, 10, 'CBAM')
     model.cuda()
 
     # optionally resume from a checkpoint
@@ -120,6 +127,8 @@ def main():
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
                                                         milestones=[100, 150], last_epoch=args.start_epoch - 1)
 
+    # optimizer = torch.optim.Adam(model.parameters(), args.lr)
+
     if args.arch in ['resnet1202', 'resnet110']:
         # for resnet1202 original paper uses lr=0.01 for first 400 minibatches for warm-up
         # then switch back. In this setup it will correspond for first epoch.
@@ -135,11 +144,12 @@ def main():
 
         # train for one epoch
         print('current lr {:.5e}'.format(optimizer.param_groups[0]['lr']))
-        train(train_loader, model, criterion, optimizer, epoch)
+        writer.add_scalar("lr/train", optimizer.param_groups[0]['lr'], epoch)
+        train(train_loader, model, criterion, optimizer, epoch, writer)
         lr_scheduler.step()
 
         # evaluate on validation set
-        prec1 = validate(val_loader, model, criterion)
+        prec1 = validate(val_loader, model, criterion, epoch, writer)
 
         # remember best prec@1 and save checkpoint
         is_best = prec1 > best_prec1
@@ -158,7 +168,7 @@ def main():
         }, is_best, filename=os.path.join(args.save_dir, 'model.th'))
 
 
-def train(train_loader, model, criterion, optimizer, epoch):
+def train(train_loader, model, criterion, optimizer, epoch, writer):
     """
         Run one train epoch
     """
@@ -210,9 +220,13 @@ def train(train_loader, model, criterion, optimizer, epoch):
                   'Prec@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
                       epoch, i, len(train_loader), batch_time=batch_time,
                       data_time=data_time, loss=losses, top1=top1))
+            writer.add_scalar("Time/train", batch_time.val, epoch)
+            writer.add_scalar("Data/train", data_time.val, epoch)
+            writer.add_scalar("Loss/train", losses.avg, epoch)
+            writer.add_scalar("Prec@1/train", top1.avg, epoch)
 
 
-def validate(val_loader, model, criterion):
+def validate(val_loader, model, criterion, epoch, writer):
     """
     Run evaluation
     """
@@ -260,6 +274,10 @@ def validate(val_loader, model, criterion):
     print(' * Prec@1 {top1.avg:.3f}'
           .format(top1=top1))
 
+    writer.add_scalar("Time/val", batch_time.val, epoch)
+    writer.add_scalar("Loss/val", losses.avg, epoch)
+    writer.add_scalar("Prec@1/val", top1.avg, epoch)
+
     return top1.avg
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
@@ -303,4 +321,10 @@ def accuracy(output, target, topk=(1,)):
 
 
 if __name__ == '__main__':
+    from clearml import Task
+    Task.add_requirements('torch', '1.1.0')
+    Task.add_requirements('torchvision', '0.3.0')
+    task = Task.init(project_name='attention-explanation',
+                     task_name=f'pytorch_resnet_cifar10-CBAM_Resnet18')
+    # task.execute_remotely("default")
     main()
