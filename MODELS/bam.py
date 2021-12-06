@@ -45,5 +45,5 @@ class BAM(nn.Module):
         self.channel_att = ChannelGate(gate_channel)
         self.spatial_att = SpatialGate(gate_channel)
     def forward(self,in_tensor):
-        att = 1 + F.sigmoid( self.channel_att(in_tensor) * self.spatial_att(in_tensor) )
+        att = 1 + torch.sigmoid( self.channel_att(in_tensor) * self.spatial_att(in_tensor) )
         return att * in_tensor
